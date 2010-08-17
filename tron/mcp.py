@@ -90,10 +90,11 @@ class MasterControlProgram(object):
     This object is responsible for figuring who needs to run and when. It will be the main entry point
     where our daemon finds work to do
     """
-    def __init__(self, working_dir):
+    def __init__(self, working_dir, context=None, state_handler=None):
         self.jobs = {}
         self.nodes = []
-        self.state_handler = StateHandler(self, working_dir)
+        self.state_handler = state_handler or StateHandler(self, working_dir)
+        self.context = context or context.ChainedCommandContext()
 
     def add_nodes(self, node_pool):
         if not node_pool:

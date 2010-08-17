@@ -19,13 +19,12 @@ ACTION_RUN_RUNNING = 4
 ACTION_RUN_FAILED = 10
 ACTION_RUN_SUCCEEDED = 11
 
-class ActionRunVariables(object):
-    """Dictionary like object that provides variable subsitution for action commands"""
-    def __init__(self, action_run):
-        self.run = action_run
+class RunTimeContext(object):
+    """Context object that gives us adjustable access to the run time of the action"""
+    def __init__(self, run_time):
+        self.run_time = run_time
 
-    def __getitem__(self, name):
-        # Extract any arthimetic stuff
+    def __getitem(self, name):
         match = re.match(r'([\w]+)([+-]*)(\d*)', name)
         attr, op, value = match.groups()
         if attr == "shortdate":
@@ -33,9 +32,9 @@ class ActionRunVariables(object):
                 delta = datetime.timedelta(days=int(value))
                 if op == "-":
                     delta *= -1
-                run_date = self.run.job_run.run_time + delta
+                run_date = self.run_time + delta
             else:
-                run_date = self.run.job_run.run_time
+                run_date = self.run_time
             
             return "%.4d-%.2d-%.2d" % (run_date.year, run_date.month, run_date.day)
         elif attr == "unixtime":
@@ -44,29 +43,32 @@ class ActionRunVariables(object):
                 delta = int(value)
             if op == "-":
                 delta *= -1
-            return int(timeutils.to_timestamp(self.run.job_run.run_time)) + delta
+            return int(timeutils.to_timestamp(self.run_time)) + delta
         elif attr == "daynumber":
             delta = 0
             if value:
                 delta = int(value)
             if op == "-":
                 delta *= -1
-            return self.run.job_run.run_time.toordinal() + delta
-        elif attr == "actionname":
-            if op:
-                raise ValueError("Adjustments not allowed")
-            return self.run.action.name
-        elif attr == "runid":
-            if op:
-                raise ValueError("Adjustments not allowed")
-            return self.run.id
-        else:
-            return super(ActionRunVariables, self).__getitem__(name)
+            return self.run_time.toordinal() + delta
 
+class ActionRunContext(object):
+    """Context object that gives us access to data about the action run itself"""
+    def __init__(self, action_run):
+        self.action_run = action_run
+    
+    @property
+    def actionname(self):
+        return self.action_run.action.name
+
+    @property
+    def runid(self):
+        return self.action_run.id
+    
 
 class ActionRun(object):
     """An instance of running a action"""
-    def __init__(self, action, job_run):
+    def __init__(self, action, job_run, context=None):
         self.action = action
         self.job_run = job_run
         self.id = "%s.%s" % (job_run.id, action.name)
@@ -84,6 +86,14 @@ class ActionRun(object):
         
         self.job_run = job_run
         self.node = action.node_pool.next() if action.node_pool else job_run.node
+
+        # Build our command string
+        context = context or CommandContext()
+        context.add(ActionRunContext(self))
+        # TODO: Where is my run_time ? Should this be the JobRun Context ?
+        context.add(RunTimeContext(self.run_time))
+
+        self.command = action.command % context
 
         self.required_runs = []
         self.waiting_runs = []
@@ -234,11 +244,6 @@ class ActionRun(object):
                 'command': self.command
         }
         
-    @property
-    def command(self):
-        action_vars = ActionRunVariables(self)
-        return self.action.command % action_vars
-
     @property
     def timeout_secs(self):
         if self.action.timeout is None:
